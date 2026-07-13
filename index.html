@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prevent the Tanay from Eating Shit</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f7f7f7 0%, #e8e8e8 100%);
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+
+        h1 {
+            font-size: 2rem;
+            color: #535353;
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+        }
+
+        .game-container {
+            position: relative;
+            width: 800px;
+            max-width: 95vw;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: #fff;
+            border: 2px solid #d0d0d0;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .score-board {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 5px;
+            font-size: 1.1rem;
+            color: #535353;
+            font-weight: bold;
+        }
+
+        .hi-score {
+            color: #999;
+        }
+
+        .instructions {
+            margin-top: 15px;
+            text-align: center;
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .instructions kbd {
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-family: inherit;
+            box-shadow: 0 2px 0 #ccc;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.92);
+            border-radius: 8px;
+            z-index: 10;
+        }
+
+        .overlay h2 {
+            font-size: 1.8rem;
+            color: #535353;
+            margin-bottom: 15px;
+        }
+
+        .overlay p {
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 1rem;
+        }
+
+        .overlay .final-score {
+            font-size: 1.3rem;
+            color: #535353;
+            margin-bottom: 5px;
+        }
+
+        .btn {
+            background: #535353;
+            color: #fff;
+            border: none;
+            padding: 12px 36px;
+            font-size: 1.1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            transition: all 0.2s;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            background: #333;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .blink {
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <h1>Prevent the Tanay from Eating Shit</h1>
+    <div class="game-container">
+        <div class="score-board">
+            <span>HI <span class="hi-score" id="hiScore">00000</span></span>
+            <span id="currentScore">00000</span>
+        </div>
+        <canvas id="gameCanvas" width="800" height="300"></canvas>
+
+        <!-- Start Screen -->
+        <div class="overlay" id="startScreen">
+            <h2>Prevent the Tanay from Eating Shit</h2>
+            <p>Jump over cacti, duck under birds!</p>
+            <button class="btn" id="startBtn">START</button>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div class="overlay hidden" id="gameOverScreen">
+            <h2>Tanay eat the Shit</h2>
+            <p class="final-score">Score: <span id="finalScore">0</span></p>
+            <p class="final-score" id="newRecord" style="color: #e8910c; display: none;">🏆 NEW HIGH SCORE!</p>
+            <button class="btn" id="restartBtn">RESTART</button>
+        </div>
+    </div>
+
+    <div class="instructions">
+        <kbd>Space</kbd> / <kbd>↑</kbd> Jump &nbsp;|&nbsp; <kbd>↓</kbd> Duck &nbsp;|&nbsp; <kbd>Space</kbd> Restart
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+
+        // Game state
+        const STATE = { READY: 0, RUNNING: 1, OVER: 2 };
+        let gameState = STATE.READY;
+
+        // Ground
+        const GROUND_Y = 250;
+        let groundOffset = 0;
+
+        // Score
+        let score = 0;
+        let hiScore = parseInt(localStorage.getItem('dinoHiScore') || '0');
+        let scoreFlash = false;
+
+        // Speed
+        let speed = 6;
+        const MAX_SPEED = 14;
+
+        // Player — the source photo is used directly, with no filters, edits, or cropping.
+        const playerPhoto = new Image();
+        playerPhoto.src = 'player-photo.png';
+
+        // Obstacle — the supplied transparent PNG is used directly for every obstacle.
+        const obstaclePhoto = new Image();
+        obstaclePhoto.src = 'obstacle-photo.png';
+
+        // Dino
+        const dino = {
+            x: 60,
+            y: GROUND_Y,
+            width: 44,
+            height: 48,
+            velY: 0,
+            gravity: 0.7,
+            jumpForce: -14,
+            isJumping: false,
+            isDucking: false,
+            duckHeight: 28,
+            duckWidth: 60,
+            runFrame: 0,
+            frameTimer: 0,
+        };
+
+        // Obstacles
+        let obstacles = [];
+        let obstacleTimer = 0;
+        let nextObstacleDelay = 80;
+
+        // Clouds
+        let clouds = [];
+
+        // Stars (for high speed effect)
+        let speedLines = [];
+
+        // Input
+        const keys = {};
+
+        // ===== Drawing Functions =====
+
+        function drawDino() {
+            ctx.save();
+            const isDucking = dino.isDucking && !dino.isJumping;
+            const photoHeight = isDucking ? dino.duckHeight : dino.height;
+            const photoWidth = photoHeight * (playerPhoto.naturalWidth / playerPhoto.naturalHeight || 0.687);
+            const characterWidth = isDucking ? dino.duckWidth : dino.width;
+            const photoX = dino.x + (characterWidth - photoWidth) / 2;
+            const photoY = (isDucking ? GROUND_Y : dino.y) - photoHeight;
+
+            // This draws the supplied transparent PNG directly, with no crop,
+            // filters, recolouring, smoothing, or other image processing.
+            if (playerPhoto.complete && playerPhoto.naturalWidth) {
+                ctx.drawImage(playerPhoto, photoX, photoY, photoWidth, photoHeight);
+            }
+
+            ctx.restore();
+        }
+
+        function drawCactus(obs) {
+            if (!obstaclePhoto.complete || !obstaclePhoto.naturalWidth) return;
+
+            if (obs.variant === 'small-group') {
+                for (let i = 0; i < obs.count; i++) {
+                    ctx.drawImage(obstaclePhoto, obs.x + i * 34, obs.y, 34, 34);
+                }
+                return;
+            }
+
+            ctx.drawImage(obstaclePhoto, obs.x, obs.y, obs.width, obs.height);
+        }
+
+        function drawBird(obs) {
+            if (obstaclePhoto.complete && obstaclePhoto.naturalWidth) {
+                ctx.drawImage(obstaclePhoto, obs.x, obs.y, obs.width, obs.height);
+            }
+        }
+
+        function drawGround() {
+            ctx.save();
+            ctx.strokeStyle = '#535353';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, GROUND_Y + 2);
+            ctx.lineTo(W, GROUND_Y + 2);
+            ctx.stroke();
+
+            // Ground texture - small bumps
+            ctx.fillStyle = '#888';
+            for (let i = 0; i < W; i += 15) {
+                const x = (i - groundOffset % 15);
+                ctx.fillRect(x, GROUND_Y + 6, 6, 2);
+            }
+
+            // Dots
+            ctx.fillStyle = '#ccc';
+            for (let i = 0; i < W; i += 40) {
+                const x = (i - groundOffset % 40);
+                ctx.fillRect(x + 10, GROUND_Y + 10, 3, 2);
+            }
+
+            ctx.restore();
+        }
+
+        function drawClouds() {
+            ctx.save();
+            ctx.fillStyle = '#c4c4c4';
+            clouds.forEach(c => {
+                ctx.fillRect(c.x + 8, c.y, 24, 6);
+                ctx.fillRect(c.x, c.y + 4, 40, 6);
+                ctx.fillRect(c.x + 4, c.y + 8, 32, 4);
+                ctx.fillRect(c.x + 12, c.y - 4, 16, 4);
+            });
+            ctx.restore();
+        }
+
+        function drawScore() {
+            ctx.save();
+            ctx.fillStyle = '#535353';
+            ctx.font = 'bold 16px "Courier New", monospace';
+            ctx.textAlign = 'right';
+            const scoreStr = String(Math.floor(score)).padStart(5, '0');
+            ctx.fillText(scoreStr, W - 20, 30);
+
+            ctx.fillStyle = '#999';
+            ctx.fillText('HI ' + String(hiScore).padStart(5, '0'), W - 120, 30);
+
+            // Flash effect on milestone
+            if (scoreFlash) {
+                ctx.fillStyle = '#535353';
+                ctx.fillRect(W - 60, 35, 40, 2);
+            }
+            ctx.restore();
+        }
+
+        // ===== Game Logic =====
+
+        function spawnObstacle() {
+            const type = Math.random();
+            if (type < 0.5) {
+                // Small cactus
+                const count = Math.random() < 0.4 ? Math.ceil(Math.random() * 3) : 1;
+                obstacles.push({
+                    type: 'cactus',
+                    variant: count > 1 ? 'small-group' : 'small',
+                    x: W + 20,
+                    y: GROUND_Y - 34,
+                    width: count > 1 ? count * 34 : 34,
+                    height: 34,
+                    count: count,
+                });
+            } else if (type < 0.8) {
+                // Large cactus
+                obstacles.push({
+                    type: 'cactus',
+                    variant: 'large',
+                    x: W + 20,
+                    y: GROUND_Y - 50,
+                    width: 50,
+                    height: 50,
+                });
+            } else {
+                // Bird (pterodactyl)
+                const heights = [GROUND_Y - 90, GROUND_Y - 65, GROUND_Y - 45];
+                obstacles.push({
+                    type: 'bird',
+                    x: W + 20,
+                    y: heights[Math.floor(Math.random() * heights.length)],
+                    width: 40,
+                    height: 40,
+                    wingFrame: 0,
+                    wingTimer: 0,
+                });
+            }
+        }
+
+        function spawnCloud() {
+            clouds.push({
+                x: W + 20,
+                y: 40 + Math.random() * 80,
+                speed: 0.5 + Math.random() * 0.8,
+            });
+        }
+
+        function updateDino() {
+            // Jump physics
+            if (dino.isJumping) {
+                dino.y += dino.velY;
+                dino.velY += dino.gravity;
+                if (dino.y >= GROUND_Y) {
+                    dino.y = GROUND_Y;
+                    dino.velY = 0;
+                    dino.isJumping = false;
+                }
+            }
+
+            // Run animation
+            dino.frameTimer++;
+            if (dino.frameTimer > 6) {
+                dino.runFrame++;
+                dino.frameTimer = 0;
+            }
+        }
+
+        function updateObstacles() {
+            obstacleTimer++;
+            if (obstacleTimer > nextObstacleDelay) {
+                spawnObstacle();
+                obstacleTimer = 0;
+                // Random delay based on speed
+                const minDelay = Math.max(40, 90 - speed * 3);
+                nextObstacleDelay = minDelay + Math.random() * 60;
+            }
+
+            obstacles.forEach(obs => {
+                obs.x -= speed;
+                if (obs.type === 'bird') {
+                    obs.wingTimer++;
+                    if (obs.wingTimer > 8) {
+                        obs.wingFrame++;
+                        obs.wingTimer = 0;
+                    }
+                }
+            });
+
+            // Remove off-screen obstacles
+            obstacles = obstacles.filter(obs => obs.x + obs.width > -50);
+        }
+
+        function updateClouds() {
+            if (Math.random() < 0.005) {
+                spawnCloud();
+            }
+            clouds.forEach(c => {
+                c.x -= c.speed;
+            });
+            clouds = clouds.filter(c => c.x + 40 > -50);
+        }
+
+        function checkCollision() {
+            const dw = dino.isDucking ? dino.duckWidth : dino.width;
+            const dh = dino.isDucking ? dino.duckHeight : dino.height;
+            const dy = dino.isDucking ? GROUND_Y - dh + 4 : dino.y - dh;
+
+            // Tighter hitbox for fairness
+            const dinoBox = {
+                x: dino.x + 6,
+                y: dy + 4,
+                w: dw - 12,
+                h: dh - 8,
+            };
+
+            for (let obs of obstacles) {
+                const obsBox = {
+                    x: obs.x + 2,
+                    y: obs.y + 2,
+                    w: obs.width - 4,
+                    h: obs.height - 4,
+                };
+
+                if (
+                    dinoBox.x < obsBox.x + obsBox.w &&
+                    dinoBox.x + dinoBox.w > obsBox.x &&
+                    dinoBox.y < obsBox.y + obsBox.h &&
+                    dinoBox.y + dinoBox.h > obsBox.y
+                ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function updateScore() {
+            score += 0.1 * (speed / 6);
+            // Flash every 100 points
+            if (Math.floor(score) > 0 && Math.floor(score) % 100 === 0 && Math.floor(score) !== Math.floor(score - 0.1)) {
+                scoreFlash = true;
+                setTimeout(() => scoreFlash = false, 300);
+            }
+            // Increase speed
+            if (speed < MAX_SPEED) {
+                speed += 0.002;
+            }
+        }
+
+        function updateGround() {
+            groundOffset += speed;
+        }
+
+        // ===== Game Loop =====
+
+        function gameLoop() {
+            // Clear
+            ctx.clearRect(0, 0, W, H);
+
+            if (gameState === STATE.RUNNING) {
+                updateDino();
+                updateObstacles();
+                updateClouds();
+                updateGround();
+                updateScore();
+
+                if (checkCollision()) {
+                    gameOver();
+                }
+            }
+
+            // Draw
+            drawClouds();
+            drawGround();
+            obstacles.forEach(obs => {
+                if (obs.type === 'cactus') drawCactus(obs);
+                else drawBird(obs);
+            });
+            drawDino();
+            drawScore();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ===== Game Control =====
+
+        function startGame() {
+            gameState = STATE.RUNNING;
+            score = 0;
+            speed = 6;
+            obstacles = [];
+            clouds = [];
+            obstacleTimer = 0;
+            dino.y = GROUND_Y;
+            dino.velY = 0;
+            dino.isJumping = false;
+            dino.isDucking = false;
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('gameOverScreen').classList.add('hidden');
+        }
+
+        function gameOver() {
+            gameState = STATE.OVER;
+            const finalScore = Math.floor(score);
+            document.getElementById('finalScore').textContent = finalScore;
+
+            if (finalScore > hiScore) {
+                hiScore = finalScore;
+                localStorage.setItem('dinoHiScore', hiScore);
+                document.getElementById('newRecord').style.display = 'block';
+            } else {
+                document.getElementById('newRecord').style.display = 'none';
+            }
+
+            document.getElementById('gameOverScreen').classList.remove('hidden');
+        }
+
+        function jump() {
+            if (gameState === STATE.RUNNING && !dino.isJumping) {
+                dino.isJumping = true;
+                dino.velY = dino.jumpForce;
+                dino.isDucking = false;
+            } else if (gameState === STATE.READY) {
+                startGame();
+            } else if (gameState === STATE.OVER) {
+                startGame();
+            }
+        }
+
+        function duck(isDucking) {
+            if (gameState === STATE.RUNNING) {
+                dino.isDucking = isDucking;
+                // Fast fall if ducking while in air
+                if (isDucking && dino.isJumping && dino.velY < 0) {
+                    dino.velY = 2;
+                }
+            }
+        }
+
+        // ===== Event Listeners =====
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') {
+                e.preventDefault();
+                if (!keys[e.code]) {
+                    jump();
+                }
+                keys[e.code] = true;
+            }
+            if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                keys[e.code] = true;
+                duck(true);
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') {
+                keys[e.code] = false;
+            }
+            if (e.code === 'ArrowDown') {
+                keys[e.code] = false;
+                duck(false);
+            }
+        });
+
+        // Touch support
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            jump();
+        }, { passive: false });
+
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', startGame);
+
+        // Initialize hi score display
+        document.getElementById('hiScore').textContent = String(hiScore).padStart(5, '0');
+
+        // Start the loop
+        gameLoop();
+    </script>
+</body>
+</html>
